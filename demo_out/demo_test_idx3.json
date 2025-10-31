@@ -1,0 +1,18 @@
+{
+  "image_index": 3,
+  "times_ms": {
+    "MaskRCNN": 177,
+    "KMeans": 51
+  },
+  "metrics_single_image": {
+    "MaskRCNN": {
+      "IoU": 0.8174608160303775,
+      "Dice": 0.8995636206516314
+    },
+    "KMeans": {
+      "IoU": 0.539807797483335,
+      "Dice": 0.7011365942757244
+    }
+  },
+  "figure": "demo_out/demo_test_idx3.png"
+}

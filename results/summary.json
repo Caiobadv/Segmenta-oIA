@@ -1,0 +1,74 @@
+{
+  "hyperparams": {
+    "epochs": 5,
+    "batch_size": 4,
+    "img_size": 256,
+    "lr": 0.0001,
+    "optimizer": "adam",
+    "patience": 2,
+    "lambda_s": 0.5,
+    "kmeans_iters": 10,
+    "kmeans_workers": 8,
+    "num_workers": 8,
+    "img_size_kmeans": 0
+  },
+  "device": "cpu",
+  "torch": "2.9.0",
+  "torchvision": "0.24.0",
+  "results": {
+    "ModelA_MaskRCNN": {
+      "confusion_matrix": [
+        [
+          1463078,
+          4056759
+        ],
+        [
+          1887831,
+          40826828
+        ]
+      ],
+      "iou_per_class": [
+        0.19750858164809496,
+        0.8729012235635002
+      ],
+      "miou": 0.5352049026057976,
+      "dice_per_class": [
+        0.3298658309008021,
+        0.932138024772778
+      ],
+      "mdice": 0.63100192783679
+    },
+    "ModelB_SpatialKMeans": {
+      "confusion_matrix": [
+        [
+          2511249,
+          3008588
+        ],
+        [
+          16711954,
+          26002705
+        ]
+      ],
+      "iou_per_class": [
+        0.11295756603685185,
+        0.5686976568243783
+      ],
+      "miou": 0.3408276114306151,
+      "dice_per_class": [
+        0.20298629432761614,
+        0.7250570616337016
+      ],
+      "mdice": 0.4640216779806589
+    },
+    "winner_by_mIoU": "Modelo A (Mask R-CNN)",
+    "delta_mIoU": 0.24949012359587408,
+    "delta_mDice": 0.2198502877547004
+  },
+  "times": {
+    "ModelA_train_total_sec": 4022.1183223724365,
+    "ModelB_infer_total_sec": 9.457440853118896
+  },
+  "best_checkpoints": {
+    "ModelA": "results/checkpoints/maskrcnn_best.pt"
+  }
+}
