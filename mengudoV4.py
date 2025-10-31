@@ -12,7 +12,6 @@ from torchvision import transforms
 from torchvision.datasets import OxfordIIITPet
 from PIL import Image
 
-# ------------- Hyperparams (CLI) -------------
 def get_args():
     p = argparse.ArgumentParser("Mask R-CNN vs Spatial K-means (rápido e completo)")
     p.add_argument("--epochs", type=int, default=5)
@@ -31,7 +30,6 @@ def get_args():
     p.add_argument("--img-size-kmeans", type=int, default=0, help="(opcional) redimensiona SÓ para K-means; 0 = usar IMG_SIZE")
     return p.parse_args()
 
-# ------------- Utils -------------
 def set_seed(s: int):
     random.seed(s); np.random.seed(s)
     torch.manual_seed(s); torch.cuda.manual_seed_all(s)
@@ -44,7 +42,6 @@ class AvgMeter:
     @property
     def avg(self): return self.v/max(1,self.n)
 
-# ------------- Dataset -------------
 class PetSegBinary(torch.utils.data.Dataset):
     """Oxford-IIIT Pet -> binário: pet (1, inclui borda) vs fundo (0)."""
     def __init__(self, root, split='train', img_size=256, seed=42):
@@ -82,7 +79,6 @@ def collate_fn(batch):
     imgs, masks = zip(*batch)
     return list(imgs), list(masks)
 
-# ------------- Métricas -------------
 NUM_CLASSES = 2
 CLASSES = ["bg","pet"]
 
@@ -100,7 +96,6 @@ def iou_dice_from_confmat(confmat):
     dice = (2*tp) / (2*tp + fp + fn + 1e-7)
     return iou, float(np.nanmean(iou)), dice, float(np.nanmean(dice))
 
-# ------------- Modelo A: Mask R-CNN -------------
 def build_mask_rcnn(img_size, num_classes=2):
     try:
         model = torchvision.models.detection.maskrcnn_resnet50_fpn(weights='DEFAULT')
@@ -114,14 +109,12 @@ def build_mask_rcnn(img_size, num_classes=2):
 
     model.transform.min_size = (img_size,); model.transform.max_size = img_size
 
-    # RPN/ROI mais econômicos
     rpn = model.rpn
     if hasattr(rpn, "pre_nms_top_n_train"): rpn.pre_nms_top_n_train = 100; rpn.pre_nms_top_n_test = 50
     if hasattr(rpn, "post_nms_top_n_train"): rpn.post_nms_top_n_train = 50;  rpn.post_nms_top_n_test = 25
     if hasattr(rpn, "batch_size_per_image"): rpn.batch_size_per_image = 128
     if hasattr(model.roi_heads, "batch_size_per_image"): model.roi_heads.batch_size_per_image = 128
 
-    # Congela backbone para treino mais rápido
     for p in model.backbone.parameters(): p.requires_grad = False
     return model
 
@@ -142,7 +135,6 @@ def masks_to_instances(masks, device):
         out.append({"boxes": box, "labels": labels, "masks": inst_mask})
     return out
 
-# ------------- Modelo B: Spatial K-means -------------
 def rgb01_to_lab01(rgb):
     a = 0.055
     rgb_lin = np.where(rgb <= 0.04045, rgb/12.92, ((rgb + a)/(1 + a))**2.4)
@@ -190,7 +182,6 @@ def kmeans_spatial_predict_np(img_t, iters, seed, lambda_s, out_size=None):
     seg = assign.reshape(H,W).astype(np.uint8)
     return seg
 
-# ------------- Avaliações auxiliares -------------
 def evaluate_loader(pred_fn, loader, device, model_name=""):
     conf = np.zeros((NUM_CLASSES, NUM_CLASSES), dtype=np.int64)
     with torch.no_grad():
@@ -227,7 +218,6 @@ def evaluate_mask_for_val(model, loader, device):
     iou, miou, dice, mdice = iou_dice_from_confmat(conf)
     return float(miou), float(mdice), conf
 
-# ------------- Extended comparison helpers -------------
 def eval_per_image(pred_fn, loader, device):
     conf_total = np.zeros((NUM_CLASSES,NUM_CLASSES), dtype=np.int64)
     rows = []
@@ -235,7 +225,7 @@ def eval_per_image(pred_fn, loader, device):
     with torch.no_grad():
         for imgs, gts in loader:
             imgs = [im.to(device, non_blocking=True) for im in imgs]
-            pred = pred_fn(imgs)  # [N,H,W]
+            pred = pred_fn(imgs) 
             pred = pred.detach().cpu().numpy().astype(np.int64)
             gt   = torch.stack(gts).cpu().numpy().astype(np.int64)
             for k in range(pred.shape[0]):
@@ -295,7 +285,6 @@ def show_examples_grid(predA_fn, predB_fn, dataset, device, k=5, seed=42, out_pn
     if out_png: plt.savefig(out_png)
     plt.show()
 
-# ------------- Main -------------
 def main():
     args = get_args()
     set_seed(args.seed)
@@ -305,7 +294,6 @@ def main():
     torch.set_num_threads(os.cpu_count() or 1)
     torch.set_num_interop_threads(min(4, os.cpu_count() or 1))
 
-    # Saída default amigável para Colab
     if args.out is None:
         out_dir = Path("/content/results") if Path("/content").exists() else Path("results")
     else:
@@ -318,7 +306,6 @@ def main():
     print(f"Torch {torch.__version__} | Torchvision {torchvision.__version__} | device={device}")
     print(f"DL workers={args.num_workers} | KMeans threads={args.kmeans_workers}")
 
-    # ---- Data
     root = Path("data")
     train_set = PetSegBinary(root=str(root), split='train', img_size=args.img_size, seed=args.seed)
     val_set   = PetSegBinary(root=str(root), split='val',   img_size=args.img_size, seed=args.seed)
@@ -329,7 +316,6 @@ def main():
     val_loader   = torch.utils.data.DataLoader(val_set,   batch_size=args.batch_size, shuffle=False, collate_fn=collate_fn, **dl_kwargs)
     test_loader  = torch.utils.data.DataLoader(test_set,  batch_size=1, shuffle=False, **{k:v for k,v in dl_kwargs.items() if k!='collate_fn'})
 
-    # ---- Modelo A
     modelA = build_mask_rcnn(args.img_size).to(device)
     params = [p for p in modelA.parameters() if p.requires_grad]
     if args.optimizer == "adam":
@@ -354,7 +340,6 @@ def main():
             preds.append(comb)
         return torch.stack(preds)
 
-    # ---- Treino Modelo A (com early stopping por val mIoU)
     history = {"epoch":[], "train_loss":[], "val_mIoU":[], "val_mDice":[], "epoch_time_s":[]}
     no_improve = 0; best_miou = -1; best_state = None
     t0_total = time.time()
@@ -387,10 +372,8 @@ def main():
     total_timeA=time.time()-t0_total
     if best_state is not None: modelA.load_state_dict(best_state)
 
-    # ---- Avaliação A no teste
     resA = evaluate_loader(lambda ims: pred_fn_maskrcnn(ims), test_loader, device, model_name="Mask R-CNN")
 
-    # ---- Modelo B: Spatial K-means (multithread no teste)
     def kmeans_single(img_cpu):
         return kmeans_spatial_predict_np(img_cpu, iters=args.kmeans_iters, seed=args.seed, lambda_s=args.lambda_s,
                                          out_size=(args.img_size_kmeans if args.img_size_kmeans>0 else None))
@@ -406,7 +389,6 @@ def main():
         results = list(ex.map(kmeans_single, imgs_list))
 
     for gt_np, pred in zip(gts_list, results):
-        # Flip automático de rótulo para alinhar "pet"
         inter = np.logical_and(gt_np==1, pred==1).sum()
         union = np.logical_or(gt_np==1, pred==1).sum()+1e-7
         inter_fl = np.logical_and(gt_np==1, (1-pred)==1).sum()
@@ -424,7 +406,6 @@ def main():
             "mdice": float(mdiceB)}
     print(f"[K-means] Test mIoU={miouB:.4f} | mDice={mdiceB:.4f} | tempo={timeB:.1f}s")
 
-    # ---- Summary + logs + curvas
     summary = {
         "hyperparams": {"epochs":args.epochs,"batch_size":args.batch_size,"img_size":args.img_size,
                         "lr":args.lr,"optimizer":args.optimizer,"patience":args.patience,
@@ -443,7 +424,6 @@ def main():
         for e,tl,vm,vd,ts in zip(history["epoch"],history["train_loss"],history["val_mIoU"],history["val_mDice"],history["epoch_time_s"]):
             w.writerow([e,tl,vm,vd,ts])
 
-    # ---- Curvas de treino do A
     try:
         log_df = pd.read_csv(out_dir/'logs'/'maskrcnn_log.csv')
         if {"epoch","train_loss","val_mIoU"}.issubset(set(log_df.columns)):
@@ -462,12 +442,10 @@ def main():
     except Exception as e:
         print("[warn] não consegui plotar curvas:", e)
 
-    # ---- Comparação estendida (por imagem + gráficos)
     print("[*] Gerando comparação estendida...")
     test_loader_A = torch.utils.data.DataLoader(test_set, batch_size=1, shuffle=False, num_workers=0, pin_memory=True, collate_fn=collate_fn)
     test_loader_B = torch.utils.data.DataLoader(test_set, batch_size=1, shuffle=False, num_workers=0, pin_memory=True, collate_fn=collate_fn)
 
-    # pred_fn_kmeans para lista de imgs
     def pred_fn_kmeans(img_batch):
         preds = []
         for im in img_batch:
@@ -488,7 +466,6 @@ def main():
     winner = "Modelo A (Mask R-CNN)" if delta_miou >= 0 else "Modelo B (K-means)"
     print(f"Vencedor por mIoU (reavaliação por imagem): {winner} | Δ mIoU={delta_miou:.4f} | Δ mDice={delta_mdice:.4f}")
 
-    # Atualiza summary.json
     try:
         with open(out_dir/'summary.json','r') as f: summ = json.load(f)
     except:
@@ -500,7 +477,6 @@ def main():
 
     
 
-    # Gráficos de comparação
     save_bar([miouA, miouB2], ["A (Mask R-CNN)","B (K-means)"], "mIoU (reavaliação por imagem)", out_dir/'figs'/'miou_global_reval.png', "mIoU")
     save_bar([mdiceA, mdiceB2], ["A (Mask R-CNN)","B (K-means)"], "mDice (reavaliação por imagem)", out_dir/'figs'/'mdice_global_reval.png', "mDice")
     save_bar(iouA_c, CLASSES, "IoU por classe — Modelo A", out_dir/'figs'/'iou_classes_A.png', "IoU")
@@ -513,11 +489,9 @@ def main():
     save_confusion_heatmap(confA, "Matriz de confusão (normalizada) — Modelo A", out_dir/'figs'/'confusion_A.png')
     save_confusion_heatmap(confB, "Matriz de confusão (normalizada) — Modelo B", out_dir/'figs'/'confusion_B.png')
 
-    # Grid qualitativo
     show_examples_grid(lambda ims: pred_fn_maskrcnn(ims), lambda ims: pred_fn_kmeans(ims), test_set, device,
                        k=5, seed=args.seed, out_png=out_dir/'figs'/'qualitativos_inline.png')
 
-    # ---- Prints finais
     print("\\n===== RESULTADOS FINAIS (TESTE) =====")
     print(f"Modelo A (Mask R-CNN):     mIoU={resA['miou']:.4f} | mDice={resA['mdice']:.4f}")
     print(f"Modelo B (Spatial K-means): mIoU={resB['miou']:.4f} | mDice={resB['mdice']:.4f}")

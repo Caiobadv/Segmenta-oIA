@@ -1,11 +1,4 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
 
-"""
-Demo — segmentação de UMA imagem (Oxford-IIIT Pet)
-Comparando: Mask R-CNN (checkpoint treinado) vs Spatial K-means (Lab+xy)
-Saída: figura (Imagem | GT | Pred A | Pred B) + JSON em ./demo_out/
-"""
 
 import argparse, json, time
 from pathlib import Path
@@ -14,11 +7,10 @@ import torch, torchvision
 from torchvision.transforms import functional as TF, InterpolationMode
 from PIL import Image
 import matplotlib
-matplotlib.use("Agg")  # não abre janela; salva direto
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-# ---------------- Utils ----------------
 def set_seed(seed=42):
     import random
     random.seed(seed); np.random.seed(seed)
@@ -27,14 +19,11 @@ def set_seed(seed=42):
 def ensure_dir(p: Path): p.mkdir(parents=True, exist_ok=True)
 
 
-# --------- RGB [0,1] -> Lab + features (Lab + y/H + x/W) ---------
 def rgb01_to_lab01(rgb01: np.ndarray) -> np.ndarray:
-    # sRGB lin
     rgb = rgb01.copy()
     mask = rgb <= 0.04045
     rgb[mask] = rgb[mask] / 12.92
     rgb[~mask] = ((rgb[~mask] + 0.055) / 1.055) ** 2.4
-    # XYZ
     M = np.array([[0.4124564, 0.3575761, 0.1804375],
                   [0.2126729, 0.7151522, 0.0721750],
                   [0.0193339, 0.1191920, 0.9503041]], dtype=np.float32)
@@ -58,7 +47,7 @@ def build_features_lab_spatial(img01: np.ndarray, lambda_s: float = 1.0) -> np.n
     yy, xx = np.meshgrid(np.arange(H)/H, np.arange(W)/W, indexing="ij")
     yy = (yy.astype(np.float32) * lambda_s)[..., None]
     xx = (xx.astype(np.float32) * lambda_s)[..., None]
-    feats = np.dstack([lab, yy, xx]).reshape(-1, 5)  # [N,5]
+    feats = np.dstack([lab, yy, xx]).reshape(-1, 5) 
     return feats
 
 def kmeans_np(X: np.ndarray, K=2, iters=12, seed=42):
@@ -73,7 +62,6 @@ def kmeans_np(X: np.ndarray, K=2, iters=12, seed=42):
     return a.reshape(-1), C
 
 
-# ---------------- Dataset + Mask R-CNN ----------------
 def get_pet(split="test", img_size=256):
     ds = torchvision.datasets.OxfordIIITPet(
         root="./data", download=True, target_types=("segmentation",)
@@ -87,20 +75,15 @@ def get_pet(split="test", img_size=256):
         def __getitem__(self, i):
             img, mask = ds[pick[i]]
 
-            # máscara original do dataset:
-            # 1 = pet, 2 = borda, 3 = fundo
             m = np.array(mask, dtype=np.uint8)
-            pet = (m != 3).astype(np.uint8)  # pet + borda => 1 ; fundo => 0
+            pet = (m != 3).astype(np.uint8)
 
-            # --- resize consistente (imagem e máscara) ---
             img = TF.resize(img, [img_size, img_size], interpolation=InterpolationMode.BILINEAR)
 
-            # para máscara, use NEAREST para não criar valores intermediários
-            mask_pil = Image.fromarray((pet * 255).astype(np.uint8))  # binária em 0/255
+            mask_pil = Image.fromarray((pet * 255).astype(np.uint8))  
             mask_rs = TF.resize(mask_pil, [img_size, img_size], interpolation=InterpolationMode.NEAREST)
-            mask_bin = (np.array(mask_rs) > 127).astype(np.uint8)      # volta p/ 0/1
-
-            return img, torch.from_numpy(mask_bin).unsqueeze(0)       # [1,H,W] uint8
+            mask_bin = (np.array(mask_rs) > 127).astype(np.uint8)    
+            return img, torch.from_numpy(mask_bin).unsqueeze(0)     
 
     return Wrap()
 
@@ -121,12 +104,11 @@ def pred_fn_maskrcnn(model, img_pil, device="cpu"):
     t = TF.pil_to_tensor(img_pil).float()/255.0
     out = model([t.to(device)])[0]
     if "masks" in out and out["masks"].shape[0] > 0:
-        m = out["masks"].detach().cpu().numpy()  # [N,1,H,W]
+        m = out["masks"].detach().cpu().numpy()
         return (m > 0.5).astype(np.uint8).max(axis=0)[0]
     return np.zeros((t.shape[1], t.shape[2]), dtype=np.uint8)
 
 
-# ---------------- Main ----------------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", required=True, help="ex.: results/checkpoints/maskrcnn_best.pt")
@@ -148,20 +130,16 @@ def main():
     img_pil, gt = ds[idx]
     gt_np = gt.squeeze(0).numpy()
 
-    # Modelo A
     modelA = build_maskrcnn(2, args.img_size, device, args.ckpt)
     t0 = time.time(); predA = pred_fn_maskrcnn(modelA, img_pil, device); tA = time.time()-t0
 
-    # Modelo B (K-means Lab+xy)
     img01 = np.array(img_pil).astype(np.float32)/255.0
     feats = build_features_lab_spatial(img01, lambda_s=args.lambda_s)
     t0 = time.time(); a, _ = kmeans_np(feats, K=2, iters=args.kmeans_iters, seed=42); tB = time.time()-t0
     predB = a.reshape(img01.shape[0], img01.shape[1]).astype(np.uint8)
-    # heuristic: garantir que classe 1 seja "pet"
     if (((predB==0)&(gt_np==1)).sum() > ((predB==1)&(gt_np==1)).sum()):
         predB = 1 - predB
 
-    # Visual
     fig, ax = plt.subplots(1, 4, figsize=(12, 4))
     ax[0].imshow(img_pil); ax[0].set_title("Imagem"); ax[0].axis("off")
     ax[1].imshow(gt_np, cmap="viridis"); ax[1].set_title("GT (pet=1)"); ax[1].axis("off")
@@ -171,7 +149,6 @@ def main():
     out_png = Path(outdir)/f"demo_{args.split}_idx{idx}.png"
     plt.savefig(out_png, dpi=140, bbox_inches="tight"); plt.close()
 
-    # Métricas rápidas (binário)
     def iou_dice(pred, gt):
         pred = pred.astype(bool); gt = gt.astype(bool)
         inter = np.logical_and(pred, gt).sum()
